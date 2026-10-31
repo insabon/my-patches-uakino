@@ -44,3 +44,4 @@ val removeAdsPatch = bytecodePatch(
         method.replaceInstruction(dispatchIdx, "nop")
     }
 }
+
