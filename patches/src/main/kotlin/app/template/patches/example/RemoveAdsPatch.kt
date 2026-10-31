@@ -100,3 +100,41 @@ val removePrerollPatch = bytecodePatch(
         }
     }
 }
+
+// uk.r62: відповідь сервера про оновлення (H = uu: A = minSupportedVC, B = latestVC).
+// a(long): minSupportedVC > поточна версія -> обовʼязкове оновлення.
+// b(long): поточна версія менша за останню -> є оновлення.
+object UpdateRequiredFingerprint : Fingerprint(
+    definingClass = "Luk/r62;",
+    name = "a",
+    returnType = "Z",
+    parameters = listOf("J"),
+)
+
+object UpdateAvailableFingerprint : Fingerprint(
+    definingClass = "Luk/r62;",
+    name = "b",
+    returnType = "Z",
+    parameters = listOf("J"),
+)
+
+@Suppress("unused")
+val disableUpdatePromptPatch = bytecodePatch(
+    name = "Disable update prompt",
+    description = "Hides the update dialog and the forced-update check.",
+    default = true
+) {
+    compatibleWith(UAKINO_COMPATIBILITY)
+
+    execute {
+        listOf(UpdateRequiredFingerprint, UpdateAvailableFingerprint).forEach { fingerprint ->
+            fingerprint.method.addInstructions(
+                0,
+                """
+                    const/4 v0, 0x0
+                    return v0
+                """
+            )
+        }
+    }
+}
