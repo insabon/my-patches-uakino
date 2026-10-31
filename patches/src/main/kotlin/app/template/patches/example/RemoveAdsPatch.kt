@@ -3,6 +3,9 @@ package app.template.patches.example
 import app.morphe.patcher.Fingerprint
 import app.morphe.patcher.extensions.InstructionExtensions.replaceInstruction
 import app.morphe.patcher.methodCall
+import app.morphe.patcher.patch.ApkFileType
+import app.morphe.patcher.patch.AppTarget
+import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.bytecodePatch
 import com.android.tools.smali.dexlib2.iface.instruction.Instruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
@@ -23,12 +26,24 @@ private fun isCall(insn: Instruction, cls: String, name: String): Boolean {
     return ref.definingClass == cls && ref.name == name
 }
 
+private val UAKINO_COMPATIBILITY = Compatibility(
+    name = "UAKino",
+    packageName = "ua.kino",
+    apkFileType = ApkFileType.APK,
+    appIconColor = 0xE50914,
+    targets = listOf(
+        AppTarget(version = "1.15")
+    )
+)
+
 @Suppress("unused")
 val removeAdsPatch = bytecodePatch(
     name = "Remove ads",
     description = "Disables the ShowAdQr ad overlay.",
     default = true
 ) {
+    compatibleWith(UAKINO_COMPATIBILITY)
+
     execute {
         val method = ShowAdQrFingerprint.method
         val insns = method.implementation!!.instructions.toList()
@@ -44,4 +59,3 @@ val removeAdsPatch = bytecodePatch(
         method.replaceInstruction(dispatchIdx, "nop")
     }
 }
-
