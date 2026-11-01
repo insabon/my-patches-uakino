@@ -3,7 +3,6 @@ package app.template.patches.example
 import app.morphe.patcher.Fingerprint
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
 import app.morphe.patcher.extensions.InstructionExtensions.replaceInstruction
-import app.morphe.patcher.fieldAccess
 import app.morphe.patcher.methodCall
 import app.morphe.patcher.patch.ApkFileType
 import app.morphe.patcher.patch.AppTarget
@@ -14,7 +13,6 @@ import com.android.tools.smali.dexlib2.Opcode
 import com.android.tools.smali.dexlib2.iface.instruction.Instruction
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
-import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import com.android.tools.smali.dexlib2.iface.reference.TypeReference
 
@@ -45,8 +43,8 @@ private val UAKINO_COMPATIBILITY = Compatibility(
 
 @Suppress("unused")
 val removeAdsPatch = bytecodePatch(
-    name = "Remove ads",
-    description = "Disables the ShowAdQr ad overlay.",
+    name = "Remove ads (1.15)",
+    description = "UAKino 1.15 only. Disables the ShowAdQr ad overlay.",
     default = true
 ) {
     compatibleWith(UAKINO_COMPATIBILITY)
@@ -76,8 +74,8 @@ object PrerollResolverFingerprint : Fingerprint(
 
 @Suppress("unused")
 val removePrerollPatch = bytecodePatch(
-    name = "Remove preroll ads",
-    description = "Makes the preroll resolver return no ad, so the movie starts immediately.",
+    name = "Remove preroll ads (1.15)",
+    description = "UAKino 1.15 only. Makes the preroll resolver return no ad, so the movie starts immediately.",
     default = true
 ) {
     compatibleWith(UAKINO_COMPATIBILITY)
@@ -122,8 +120,8 @@ object UpdateAvailableFingerprint : Fingerprint(
 
 @Suppress("unused")
 val disableUpdatePromptPatch = bytecodePatch(
-    name = "Disable update prompt",
-    description = "Hides the update dialog and the forced-update check.",
+    name = "Disable update prompt (1.15)",
+    description = "UAKino 1.15 only. Hides the update dialog and the forced-update check.",
     default = true
 ) {
     compatibleWith(UAKINO_COMPATIBILITY)
@@ -170,7 +168,7 @@ object UpdateAvailable114Fingerprint : Fingerprint(
 @Suppress("unused")
 val disableUpdatePrompt114Patch = bytecodePatch(
     name = "Disable update prompt (1.14)",
-    description = "Hides the update dialog and the forced-update check in UAKino 1.14.",
+    description = "UAKino 1.14 only. Hides the update dialog and the forced-update check.",
     default = true
 ) {
     compatibleWith(UAKINO_114_COMPATIBILITY)
@@ -188,10 +186,7 @@ val disableUpdatePrompt114Patch = bytecodePatch(
     }
 }
 
-// ---- UAKino 1.13: "Немає підключення до інтернету або невідомий хост" ----
-// DoH-канали вмикаються лише після відповіді сервера (kq2.b — набір дозволених каналів).
-// Поки набір порожній, застосунок падає на системний DNS, який блокує провайдер.
-// Патч змушує перевірку kq2.b.contains(channel) завжди повертати true.
+// ---- UAKino 1.13: перевірка оновлення (xp1 замість r62/ts1) ----
 
 private val UAKINO_113_COMPATIBILITY = Compatibility(
     name = "UAKino",
@@ -203,52 +198,45 @@ private val UAKINO_113_COMPATIBILITY = Compatibility(
     )
 )
 
-// uk.q: обгортка функції kq2.isEnabled(DohChannel)
-object DohEnabledWrapperFingerprint : Fingerprint(
-    definingClass = "Luk/q;",
-    filters = listOf(
-        fieldAccess(opcode = Opcode.SGET_OBJECT, definingClass = "Luk/kq2;", name = "b")
-    )
+object UpdateRequired113Fingerprint : Fingerprint(
+    definingClass = "Luk/xp1;",
+    name = "a",
+    returnType = "Z",
+    parameters = listOf("J"),
 )
 
-// uk.fz6: друге місце з тією ж перевіркою
-object DohEnabledCheckFingerprint : Fingerprint(
-    definingClass = "Luk/fz6;",
-    filters = listOf(
-        fieldAccess(opcode = Opcode.SGET_OBJECT, definingClass = "Luk/kq2;", name = "b")
-    )
+object UpdateAvailable113Fingerprint : Fingerprint(
+    definingClass = "Luk/xp1;",
+    name = "b",
+    returnType = "Z",
+    parameters = listOf("J"),
 )
 
 @Suppress("unused")
-val enableDohPatch = bytecodePatch(
-    name = "Enable DNS-over-HTTPS (1.13)",
-    description = "Forces DoH channels on so the app does not fall back to the blocked system DNS.",
+val disableUpdatePrompt113Patch = bytecodePatch(
+    name = "Disable update prompt (1.13)",
+    description = "UAKino 1.13 only. Hides the update dialog and the forced-update check.",
     default = true
 ) {
     compatibleWith(UAKINO_113_COMPATIBILITY)
 
     execute {
-        listOf(DohEnabledWrapperFingerprint, DohEnabledCheckFingerprint).forEach { fingerprint ->
-            val method = fingerprint.method
-            val insns = method.implementation!!.instructions.toList()
+        // a(long): обовʼязкове оновлення
+        UpdateRequired113Fingerprint.method.addInstructions(
+            0,
+            """
+                const/4 v0, 0x0
+                return v0
+            """
+        )
 
-            val sgetIdx = insns.indexOfFirst {
-                val ref = (it as? ReferenceInstruction)?.reference as? FieldReference
-                it.opcode == Opcode.SGET_OBJECT && ref?.definingClass == "Luk/kq2;" && ref.name == "b"
-            }
-            check(sgetIdx != -1) { "kq2.b access not found" }
-
-            val invokeIdx = (sgetIdx + 1 until insns.size).first {
-                val ref = (insns[it] as? ReferenceInstruction)?.reference as? MethodReference
-                (insns[it].opcode == Opcode.INVOKE_INTERFACE ||
-                    insns[it].opcode == Opcode.INVOKE_VIRTUAL) && ref?.name == "contains"
-            }
-            val resultInsn = insns[invokeIdx + 1]
-            check(resultInsn.opcode == Opcode.MOVE_RESULT) { "move-result not found after contains" }
-
-            val reg = (resultInsn as OneRegisterInstruction).registerA
-            method.replaceInstruction(invokeIdx, "nop")
-            method.replaceInstruction(invokeIdx + 1, "const/16 v$reg, 0x1")
-        }
+        // b(long): є нова версія (якщо такого методу немає, просто пропускаємо)
+        runCatching { UpdateAvailable113Fingerprint.method }.getOrNull()?.addInstructions(
+            0,
+            """
+                const/4 v0, 0x0
+                return v0
+            """
+        )
     }
 }
