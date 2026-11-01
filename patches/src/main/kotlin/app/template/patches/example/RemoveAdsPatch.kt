@@ -13,6 +13,8 @@ import com.android.tools.smali.dexlib2.Opcode
 import com.android.tools.smali.dexlib2.iface.instruction.Instruction
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
+import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import com.android.tools.smali.dexlib2.iface.reference.TypeReference
 
@@ -186,7 +188,9 @@ val disableUpdatePrompt114Patch = bytecodePatch(
     }
 }
 
-// ---- UAKino 1.13: перевірка оновлення (xp1 замість r62/ts1) ----
+// ---- UAKino 1.13: експеримент з підміною версії для Firebase Remote Config ----
+// ConfigFetchHttpClient.a(...) надсилає Google "appVersion" (versionName) і "appBuild" (versionCode).
+// Підставляємо значення версії 1.15 (versionCode 28), щоб налаштування приходили як для 1.15.
 
 private val UAKINO_113_COMPATIBILITY = Compatibility(
     name = "UAKino",
@@ -198,45 +202,47 @@ private val UAKINO_113_COMPATIBILITY = Compatibility(
     )
 )
 
-object UpdateRequired113Fingerprint : Fingerprint(
-    definingClass = "Luk/xp1;",
-    name = "a",
-    returnType = "Z",
-    parameters = listOf("J"),
-)
-
-object UpdateAvailable113Fingerprint : Fingerprint(
-    definingClass = "Luk/xp1;",
-    name = "b",
-    returnType = "Z",
-    parameters = listOf("J"),
+object RemoteConfigRequestFingerprint : Fingerprint(
+    definingClass = "/ConfigFetchHttpClient;",
+    filters = listOf(string("appVersion"))
 )
 
 @Suppress("unused")
-val disableUpdatePrompt113Patch = bytecodePatch(
-    name = "Disable update prompt (1.13)",
-    description = "UAKino 1.13 only. Hides the update dialog and the forced-update check.",
+val spoofRemoteConfigVersion113Patch = bytecodePatch(
+    name = "Spoof version as 1.15 for Remote Config (1.13)",
+    description = "UAKino 1.13 only. Experimental: reports version 1.15 to Firebase Remote Config.",
     default = true
 ) {
     compatibleWith(UAKINO_113_COMPATIBILITY)
 
     execute {
-        // a(long): обовʼязкове оновлення
-        UpdateRequired113Fingerprint.method.addInstructions(
-            0,
-            """
-                const/4 v0, 0x0
-                return v0
-            """
-        )
+        val method = RemoteConfigRequestFingerprint.method
+        val insns = method.implementation!!.instructions.toList()
 
-        // b(long): є нова версія (якщо такого методу немає, просто пропускаємо)
-        runCatching { UpdateAvailable113Fingerprint.method }.getOrNull()?.addInstructions(
-            0,
-            """
-                const/4 v0, 0x0
-                return v0
-            """
-        )
+        // iget-object vX, vY, PackageInfo->versionName  ->  const-string vX, "1.15"
+        val nameIdx = insns.indexOfFirst {
+            val ref = (it as? ReferenceInstruction)?.reference as? FieldReference
+            it.opcode == Opcode.IGET_OBJECT &&
+                ref?.definingClass == "Landroid/content/pm/PackageInfo;" &&
+                ref.name == "versionName"
+        }
+        check(nameIdx != -1) { "PackageInfo.versionName read not found" }
+        val nameReg = (insns[nameIdx] as TwoRegisterInstruction).registerA
+        method.replaceInstruction(nameIdx, "const-string v$nameReg, \"1.15\"")
+
+        // invoke-static {PackageInfo}, X->C(PackageInfo)J ; move-result-wide vA  ->  const-wide/16 vA, 28
+        val buildIdx = insns.indexOfFirst {
+            val ref = (it as? ReferenceInstruction)?.reference as? MethodReference
+            it.opcode == Opcode.INVOKE_STATIC &&
+                ref != null &&
+                ref.returnType == "J" &&
+                ref.parameterTypes.map { type -> type.toString() } ==
+                listOf("Landroid/content/pm/PackageInfo;")
+        }
+        check(buildIdx != -1) { "versionCode helper call not found" }
+        val resultInsn = insns[buildIdx + 1]
+        check(resultInsn.opcode == Opcode.MOVE_RESULT_WIDE) { "move-result-wide not found" }
+        val buildReg = (resultInsn as OneRegisterInstruction).registerA
+        method.replaceInstruction(buildIdx + 1, "const-wide/16 v$buildReg, 0x1c")
     }
 }
