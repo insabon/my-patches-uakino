@@ -3,6 +3,7 @@ package app.template.patches.example
 import app.morphe.patcher.Fingerprint
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
 import app.morphe.patcher.extensions.InstructionExtensions.replaceInstruction
+import app.morphe.patcher.fieldAccess
 import app.morphe.patcher.methodCall
 import app.morphe.patcher.patch.ApkFileType
 import app.morphe.patcher.patch.AppTarget
@@ -13,6 +14,7 @@ import com.android.tools.smali.dexlib2.Opcode
 import com.android.tools.smali.dexlib2.iface.instruction.Instruction
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import com.android.tools.smali.dexlib2.iface.reference.TypeReference
 
@@ -182,6 +184,71 @@ val disableUpdatePrompt114Patch = bytecodePatch(
                     return v0
                 """
             )
+        }
+    }
+}
+
+// ---- UAKino 1.13: "Немає підключення до інтернету або невідомий хост" ----
+// DoH-канали вмикаються лише після відповіді сервера (kq2.b — набір дозволених каналів).
+// Поки набір порожній, застосунок падає на системний DNS, який блокує провайдер.
+// Патч змушує перевірку kq2.b.contains(channel) завжди повертати true.
+
+private val UAKINO_113_COMPATIBILITY = Compatibility(
+    name = "UAKino",
+    packageName = "ua.kino",
+    apkFileType = ApkFileType.APK,
+    appIconColor = 0xE50914,
+    targets = listOf(
+        AppTarget(version = "1.13")
+    )
+)
+
+// uk.q: обгортка функції kq2.isEnabled(DohChannel)
+object DohEnabledWrapperFingerprint : Fingerprint(
+    definingClass = "Luk/q;",
+    filters = listOf(
+        fieldAccess(opcode = Opcode.SGET_OBJECT, definingClass = "Luk/kq2;", name = "b")
+    )
+)
+
+// uk.fz6: друге місце з тією ж перевіркою
+object DohEnabledCheckFingerprint : Fingerprint(
+    definingClass = "Luk/fz6;",
+    filters = listOf(
+        fieldAccess(opcode = Opcode.SGET_OBJECT, definingClass = "Luk/kq2;", name = "b")
+    )
+)
+
+@Suppress("unused")
+val enableDohPatch = bytecodePatch(
+    name = "Enable DNS-over-HTTPS (1.13)",
+    description = "Forces DoH channels on so the app does not fall back to the blocked system DNS.",
+    default = true
+) {
+    compatibleWith(UAKINO_113_COMPATIBILITY)
+
+    execute {
+        listOf(DohEnabledWrapperFingerprint, DohEnabledCheckFingerprint).forEach { fingerprint ->
+            val method = fingerprint.method
+            val insns = method.implementation!!.instructions.toList()
+
+            val sgetIdx = insns.indexOfFirst {
+                val ref = (it as? ReferenceInstruction)?.reference as? FieldReference
+                it.opcode == Opcode.SGET_OBJECT && ref?.definingClass == "Luk/kq2;" && ref.name == "b"
+            }
+            check(sgetIdx != -1) { "kq2.b access not found" }
+
+            val invokeIdx = (sgetIdx + 1 until insns.size).first {
+                val ref = (insns[it] as? ReferenceInstruction)?.reference as? MethodReference
+                (insns[it].opcode == Opcode.INVOKE_INTERFACE ||
+                    insns[it].opcode == Opcode.INVOKE_VIRTUAL) && ref?.name == "contains"
+            }
+            val resultInsn = insns[invokeIdx + 1]
+            check(resultInsn.opcode == Opcode.MOVE_RESULT) { "move-result not found after contains" }
+
+            val reg = (resultInsn as OneRegisterInstruction).registerA
+            method.replaceInstruction(invokeIdx, "nop")
+            method.replaceInstruction(invokeIdx + 1, "const/16 v$reg, 0x1")
         }
     }
 }
