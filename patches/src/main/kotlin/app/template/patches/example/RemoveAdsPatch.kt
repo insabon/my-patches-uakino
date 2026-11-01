@@ -138,3 +138,50 @@ val disableUpdatePromptPatch = bytecodePatch(
         }
     }
 }
+
+// ---- UAKino 1.14: ті самі перевірки, але інші імена (r62 -> ts1) ----
+
+private val UAKINO_114_COMPATIBILITY = Compatibility(
+    name = "UAKino",
+    packageName = "ua.kino",
+    apkFileType = ApkFileType.APK,
+    appIconColor = 0xE50914,
+    targets = listOf(
+        AppTarget(version = "1.14")
+    )
+)
+
+object UpdateRequired114Fingerprint : Fingerprint(
+    definingClass = "Luk/ts1;",
+    name = "a",
+    returnType = "Z",
+    parameters = listOf("J"),
+)
+
+object UpdateAvailable114Fingerprint : Fingerprint(
+    definingClass = "Luk/ts1;",
+    name = "b",
+    returnType = "Z",
+    parameters = listOf("J"),
+)
+
+@Suppress("unused")
+val disableUpdatePrompt114Patch = bytecodePatch(
+    name = "Disable update prompt (1.14)",
+    description = "Hides the update dialog and the forced-update check in UAKino 1.14.",
+    default = true
+) {
+    compatibleWith(UAKINO_114_COMPATIBILITY)
+
+    execute {
+        listOf(UpdateRequired114Fingerprint, UpdateAvailable114Fingerprint).forEach { fingerprint ->
+            fingerprint.method.addInstructions(
+                0,
+                """
+                    const/4 v0, 0x0
+                    return v0
+                """
+            )
+        }
+    }
+}
