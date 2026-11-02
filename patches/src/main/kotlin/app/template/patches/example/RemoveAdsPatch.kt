@@ -8,6 +8,8 @@ import app.morphe.patcher.patch.ApkFileType
 import app.morphe.patcher.patch.AppTarget
 import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.bytecodePatch
+import app.morphe.patcher.patch.resourcePatch
+import org.w3c.dom.Element
 import app.morphe.patcher.string
 import com.android.tools.smali.dexlib2.Opcode
 import com.android.tools.smali.dexlib2.iface.instruction.Instruction
@@ -188,9 +190,10 @@ val disableUpdatePrompt114Patch = bytecodePatch(
     }
 }
 
-// ---- UAKino 1.13: експеримент з підміною версії для Firebase Remote Config ----
-// ConfigFetchHttpClient.a(...) надсилає Google "appVersion" (versionName) і "appBuild" (versionCode).
-// Підставляємо значення версії 1.15 (versionCode 28), щоб налаштування приходили як для 1.15.
+// ---- UAKino 1.13: підняти версію в маніфесті до 1.15 ----
+// Застосунок і сервер бачать версію через PackageManager, який читає її з AndroidManifest.xml.
+// Підміна в маніфесті діє скрізь одразу (запити, Remote Config, перевірка оновлення),
+// а код застосунку залишається від 1.13. 1.15 має versionCode 28, 1.13 має 26.
 
 private val UAKINO_113_COMPATIBILITY = Compatibility(
     name = "UAKino",
@@ -202,47 +205,19 @@ private val UAKINO_113_COMPATIBILITY = Compatibility(
     )
 )
 
-object RemoteConfigRequestFingerprint : Fingerprint(
-    definingClass = "/ConfigFetchHttpClient;",
-    filters = listOf(string("appVersion"))
-)
-
 @Suppress("unused")
-val spoofRemoteConfigVersion113Patch = bytecodePatch(
-    name = "Spoof version as 1.15 for Remote Config (1.13)",
-    description = "UAKino 1.13 only. Experimental: reports version 1.15 to Firebase Remote Config.",
+val raiseVersion113Patch = resourcePatch(
+    name = "Raise version to 1.15 in manifest (1.13)",
+    description = "UAKino 1.13 only. Experimental: sets versionName 1.15 and versionCode 28 in AndroidManifest.xml.",
     default = true
 ) {
     compatibleWith(UAKINO_113_COMPATIBILITY)
 
     execute {
-        val method = RemoteConfigRequestFingerprint.method
-        val insns = method.implementation!!.instructions.toList()
-
-        // iget-object vX, vY, PackageInfo->versionName  ->  const-string vX, "1.15"
-        val nameIdx = insns.indexOfFirst {
-            val ref = (it as? ReferenceInstruction)?.reference as? FieldReference
-            it.opcode == Opcode.IGET_OBJECT &&
-                ref?.definingClass == "Landroid/content/pm/PackageInfo;" &&
-                ref.name == "versionName"
+        document("AndroidManifest.xml").use { document ->
+            val manifest = document.getElementsByTagName("manifest").item(0) as Element
+            manifest.setAttribute("android:versionCode", "28")
+            manifest.setAttribute("android:versionName", "1.15")
         }
-        check(nameIdx != -1) { "PackageInfo.versionName read not found" }
-        val nameReg = (insns[nameIdx] as TwoRegisterInstruction).registerA
-        method.replaceInstruction(nameIdx, "const-string v$nameReg, \"1.15\"")
-
-        // invoke-static {PackageInfo}, X->C(PackageInfo)J ; move-result-wide vA  ->  const-wide/16 vA, 28
-        val buildIdx = insns.indexOfFirst {
-            val ref = (it as? ReferenceInstruction)?.reference as? MethodReference
-            it.opcode == Opcode.INVOKE_STATIC &&
-                ref != null &&
-                ref.returnType == "J" &&
-                ref.parameterTypes.map { type -> type.toString() } ==
-                listOf("Landroid/content/pm/PackageInfo;")
-        }
-        check(buildIdx != -1) { "versionCode helper call not found" }
-        val resultInsn = insns[buildIdx + 1]
-        check(resultInsn.opcode == Opcode.MOVE_RESULT_WIDE) { "move-result-wide not found" }
-        val buildReg = (resultInsn as OneRegisterInstruction).registerA
-        method.replaceInstruction(buildIdx + 1, "const-wide/16 v$buildReg, 0x1c")
     }
 }
