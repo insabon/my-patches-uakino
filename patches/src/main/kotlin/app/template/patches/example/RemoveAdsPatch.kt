@@ -190,27 +190,29 @@ val disableUpdatePrompt114Patch = bytecodePatch(
     }
 }
 
-// ---- UAKino 1.13: довіра до користувацьких сертифікатів (для перехоплення трафіку mitmproxy) ----
+// ---- Налагодження: довіра до користувацьких сертифікатів (для перехоплення трафіку mitmproxy) ----
 // У network_security_config.xml дозволено лише системні сертифікати. Додаємо src="user".
-// Закріплення сертифікатів (<pin-set>) у файлі немає.
+// УВАГА: знижує безпеку застосунку. Вмикати лише для налагодження (default = false).
 
-private val UAKINO_113_COMPATIBILITY = Compatibility(
+private val UAKINO_DEBUG_COMPATIBILITY = Compatibility(
     name = "UAKino",
     packageName = "ua.kino",
     apkFileType = ApkFileType.APK,
     appIconColor = 0xE50914,
     targets = listOf(
-        AppTarget(version = "1.13")
+        AppTarget(version = "1.13"),
+        AppTarget(version = "1.14"),
+        AppTarget(version = "1.15")
     )
 )
 
 @Suppress("unused")
-val trustUserCertificates113Patch = resourcePatch(
-    name = "Trust user certificates (1.13)",
-    description = "UAKino 1.13 only. Allows user-installed CA certificates (for traffic inspection).",
-    default = true
+val trustUserCertificatesPatch = resourcePatch(
+    name = "Trust user certificates (debug, 1.13-1.15)",
+    description = "UAKino 1.13, 1.14, 1.15. For traffic inspection only: allows user-installed CA certificates.",
+    default = false
 ) {
-    compatibleWith(UAKINO_113_COMPATIBILITY)
+    compatibleWith(UAKINO_DEBUG_COMPATIBILITY)
 
     execute {
         document("res/xml/network_security_config.xml").use { document ->
