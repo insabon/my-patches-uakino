@@ -190,10 +190,9 @@ val disableUpdatePrompt114Patch = bytecodePatch(
     }
 }
 
-// ---- UAKino 1.13: підняти версію в маніфесті до 1.15 ----
-// Застосунок і сервер бачать версію через PackageManager, який читає її з AndroidManifest.xml.
-// Підміна в маніфесті діє скрізь одразу (запити, Remote Config, перевірка оновлення),
-// а код застосунку залишається від 1.13. 1.15 має versionCode 28, 1.13 має 26.
+// ---- UAKino 1.13: довіра до користувацьких сертифікатів (для перехоплення трафіку mitmproxy) ----
+// У network_security_config.xml дозволено лише системні сертифікати. Додаємо src="user".
+// Закріплення сертифікатів (<pin-set>) у файлі немає.
 
 private val UAKINO_113_COMPATIBILITY = Compatibility(
     name = "UAKino",
@@ -206,18 +205,22 @@ private val UAKINO_113_COMPATIBILITY = Compatibility(
 )
 
 @Suppress("unused")
-val raiseVersion113Patch = resourcePatch(
-    name = "Raise version to 1.15 in manifest (1.13)",
-    description = "UAKino 1.13 only. Experimental: sets versionName 1.15 and versionCode 28 in AndroidManifest.xml.",
+val trustUserCertificates113Patch = resourcePatch(
+    name = "Trust user certificates (1.13)",
+    description = "UAKino 1.13 only. Allows user-installed CA certificates (for traffic inspection).",
     default = true
 ) {
     compatibleWith(UAKINO_113_COMPATIBILITY)
 
     execute {
-        document("AndroidManifest.xml").use { document ->
-            val manifest = document.getElementsByTagName("manifest").item(0) as Element
-            manifest.setAttribute("android:versionCode", "28")
-            manifest.setAttribute("android:versionName", "1.15")
+        document("res/xml/network_security_config.xml").use { document ->
+            val anchors = document.getElementsByTagName("trust-anchors")
+            for (i in 0 until anchors.length) {
+                val anchor = anchors.item(i) as Element
+                val certificates = document.createElement("certificates")
+                certificates.setAttribute("src", "user")
+                anchor.appendChild(certificates)
+            }
         }
     }
 }
