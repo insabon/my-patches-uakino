@@ -15,8 +15,6 @@ import com.android.tools.smali.dexlib2.Opcode
 import com.android.tools.smali.dexlib2.iface.instruction.Instruction
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
-import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
-import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import com.android.tools.smali.dexlib2.iface.reference.TypeReference
 
@@ -187,7 +185,7 @@ val disableUpdatePrompt114Patch = bytecodePatch(
 }
 
 // ============================================================================
-// UAKino 1.13: виправлення DNS та оновлення клієнтського сертифіката mTLS
+// UAKino 1.13
 // ============================================================================
 
 private val UAKINO_113_COMPATIBILITY = Compatibility(
@@ -200,10 +198,7 @@ private val UAKINO_113_COMPATIBILITY = Compatibility(
     )
 )
 
-// 1. Примусове ввімкнення DoH:
-// uk.kq2 перевіряє прапорці каналів (isEnabled). Якщо сервер не надав конфіг,
-// додаток перемикався на системний DNS і викидав UnknownHostException.
-// Робимо так, щоб метод kq2.a завжди повертав Boolean.TRUE.
+// 1. Примусове ввімкнення DoH замість скидання на системний DNS (UnknownHostException)
 object ForceDoh113Fingerprint : Fingerprint(
     definingClass = "Luk/kq2;",
     name = "a",
@@ -230,35 +225,24 @@ val forceDoh113Patch = bytecodePatch(
     }
 }
 
-// 2. Оновлення пари ключів mTLS:
-// У 1.13 сертифікат закінчився 8 жовтня 2026 р. (помилка 403 на Cloudflare).
-// Підміняємо файли сертифіката та закритого ключа в активах на свіжі.
+// 2. Дозвіл на встановлення користувацьких сертифікатів CA (для роботи з проксі)
 @Suppress("unused")
-val updateMtlsCertificates113Patch = resourcePatch(
-    name = "Update mTLS certificates (1.13)",
-    description = "UAKino 1.13 only. Replaces expired client certificate and private key with fresh credentials from 1.15.",
+val trustUserCertificates113Patch = resourcePatch(
+    name = "Trust user certificates (1.13)",
+    description = "UAKino 1.13 only. Allows user-installed CA certificates (for traffic inspection).",
     default = true
 ) {
     compatibleWith(UAKINO_113_COMPATIBILITY)
 
     execute {
-        val certFile = file("assets/composeResources/uakino.core.generated.resources/files/client_certificate.pem")
-        val keyFile = file("assets/composeResources/uakino.core.generated.resources/files/client_key.pem")
-
-        if (FRESH_115_CERTIFICATE_PEM.isNotBlank()) {
-            certFile.writeText(FRESH_115_CERTIFICATE_PEM)
-        }
-        if (FRESH_115_PRIVATE_KEY_PEM.isNotBlank()) {
-            keyFile.writeText(FRESH_115_PRIVATE_KEY_PEM)
+        document("res/xml/network_security_config.xml").use { document ->
+            val anchors = document.getElementsByTagName("trust-anchors")
+            for (i in 0 until anchors.length) {
+                val anchor = anchors.item(i) as Element
+                val certificates = document.createElement("certificates")
+                certificates.setAttribute("src", "user")
+                anchor.appendChild(certificates)
+            }
         }
     }
 }
-
-// Заповніть цими рядками отримані з 1.15 дані PEM
-private const val FRESH_115_CERTIFICATE_PEM = """-----BEGIN CERTIFICATE-----
-[ВСТАВИТИ_СЮДИ_АКТУАЛЬНИЙ_СЕРТИФІКАТ_З_1.15]
------END CERTIFICATE-----"""
-
-private const val FRESH_115_PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
-[ВСТАВИТИ_СЮДИ_АКТУАЛЬНИЙ_КЛЮЧ_З_1.15]
------END PRIVATE KEY-----"""
